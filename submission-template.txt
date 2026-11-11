@@ -1,2 +1,0 @@
-Live URL: https://YOUR-PROJECT.vercel.app
-GitHub Repository: https://github.com/Razee-bot/attendance-portal
