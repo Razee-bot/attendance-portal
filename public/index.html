@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attendance Management Portal</title>
+<style>
+  :root {
+    --ink:#1d2a3a; --muted:#5d6b7c; --paper:#f6f7f9; --card:#fff; --line:#d9dee5;
+    --accent:#1f5fbf; --accent-d:#174a96; --danger:#b3261e; --ok:#1e7a46;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; background:var(--paper); color:var(--ink); line-height:1.5; }
+  header { background:var(--ink); color:#fff; padding:20px 24px; }
+  header h1 { margin:0; font-size:1.4rem; font-weight:600; }
+  header p { margin:2px 0 0; color:#b9c4d2; font-size:.9rem; }
+  main { max-width:1000px; margin:0 auto; padding:24px 16px 48px; display:grid; gap:24px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:20px; }
+  h2 { margin:0 0 14px; font-size:1.1rem; }
+  form { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; align-items:end; }
+  label { display:grid; gap:4px; font-size:.85rem; color:var(--muted); }
+  input { font:inherit; color:var(--ink); padding:8px 10px; border:1px solid var(--line); border-radius:4px; background:#fff; }
+  input:focus-visible, button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  button { font:inherit; cursor:pointer; border:1px solid transparent; border-radius:4px; padding:8px 14px; background:var(--accent); color:#fff; }
+  button:hover { background:var(--accent-d); }
+  button.secondary { background:#fff; color:var(--ink); border-color:var(--line); }
+  button.secondary:hover { background:var(--paper); }
+  button.danger { background:#fff; color:var(--danger); border-color:var(--danger); }
+  button.danger:hover { background:#fdecea; }
+  .actions { display:flex; gap:8px; }
+  .table-wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:.92rem; }
+  th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; font-size:.85rem; }
+  td.row-actions { display:flex; gap:6px; }
+  td.row-actions button { padding:4px 10px; font-size:.85rem; }
+  .empty { color:var(--muted); padding:16px 0; }
+  #toast { position:fixed; right:16px; bottom:16px; padding:10px 16px; border-radius:4px; color:#fff; background:var(--ok); opacity:0; pointer-events:none; transition:opacity .2s; max-width:80vw; }
+  #toast.show { opacity:1; }
+  #toast.error { background:var(--danger); }
+  @media (prefers-reduced-motion: reduce) { #toast { transition:none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Attendance Management Portal</h1>
+  <p>Add, review, correct and remove attendance records.</p>
+</header>
+
+<main>
+  <section>
+    <h2 id="form-title">Add attendance record</h2>
+    <form id="record-form">
+      <label>Date(s) <input type="text" id="dates" required placeholder="2026-11-10, 2026-11-12" pattern="\s*\d{4}-\d{2}-\d{2}\s*(,\s*\d{4}-\d{2}-\d{2}\s*)*" title="YYYY-MM-DD, separate several with commas"></label>
+      <label>Subject name <input type="text" id="subject" required placeholder="e.g. Database Systems Lab"></label>
+      <label>Section <input type="text" id="section" required placeholder="e.g. BSIT-GD"></label>
+      <label>Student name <input type="text" id="studentName" required placeholder="Full name"></label>
+      <div class="actions">
+        <button type="submit" id="save-btn">Add record</button>
+        <button type="button" class="secondary" id="cancel-btn" hidden>Cancel edit</button>
+      </div>
+    </form>
+  </section>
+
+  <section>
+    <h2>Attendance records <span id="count" style="color:var(--muted);font-weight:400"></span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Attendance dates</th><th>Subject</th><th>Section</th><th>Student</th><th>Actions</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="empty" id="empty" hidden>No records yet. Add the first one above.</p>
+  </section>
+</main>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const API = "/api/records";
+const $ = (id) => document.getElementById(id);
+let records = [];
+let editingId = null;
+
+function toast(msg, isError) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = "show" + (isError ? " error" : "");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => (t.className = ""), 3000);
+}
+
+async function api(url, options) {
+  const res = await fetch(url, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Request failed (" + res.status + ")");
+  return data;
+}
+
+function esc(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// Dates may be stored as strings or Date values; show YYYY-MM-DD.
+function dates(r) {
+  return (r.attendance_dates || []).map((d) => String(d).slice(0, 10)).join(", ");
+}
+
+function render() {
+  $("rows").innerHTML = records.map((r) =>
+    "<tr><td>" + esc(dates(r)) + "</td><td>" + esc(r.subject_name) + "</td><td>" + esc(r.section) +
+    "</td><td>" + esc(r.student_name) + "</td><td class='row-actions'>" +
+    "<button class='secondary' data-edit='" + r._id + "'>Edit</button>" +
+    "<button class='danger' data-del='" + r._id + "'>Delete</button></td></tr>"
+  ).join("");
+  $("empty").hidden = records.length > 0;
+  $("count").textContent = records.length ? "(" + records.length + ")" : "";
+}
+
+async function load() {
+  try {
+    records = await api(API);
+    render();
+  } catch (e) { toast(e.message, true); }
+}
+
+function resetForm() {
+  editingId = null;
+  $("record-form").reset();
+  $("form-title").textContent = "Add attendance record";
+  $("save-btn").textContent = "Add record";
+  $("cancel-btn").hidden = true;
+}
+
+$("record-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = JSON.stringify({
+    attendance_dates: $("dates").value, subject_name: $("subject").value,
+    section: $("section").value, student_name: $("studentName").value,
+  });
+  const headers = { "Content-Type": "application/json" };
+  try {
+    if (editingId) {
+      await api(API + "/" + editingId, { method: "PUT", headers, body });
+      toast("Record updated");
+    } else {
+      await api(API, { method: "POST", headers, body });
+      toast("Record added");
+    }
+    resetForm();
+    load();
+  } catch (err) { toast(err.message, true); }
+});
+
+$("cancel-btn").addEventListener("click", resetForm);
+
+$("rows").addEventListener("click", async (e) => {
+  const editId = e.target.dataset.edit, delId = e.target.dataset.del;
+  if (editId) {
+    const r = records.find((x) => x._id === editId);
+    editingId = editId;
+    $("dates").value = dates(r); $("subject").value = r.subject_name;
+    $("section").value = r.section; $("studentName").value = r.student_name;
+    $("form-title").textContent = "Edit attendance record";
+    $("save-btn").textContent = "Save changes";
+    $("cancel-btn").hidden = false;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  if (delId) {
+    const r = records.find((x) => x._id === delId);
+    if (!confirm("Delete the record for " + r.student_name + "? This cannot be undone.")) return;
+    try {
+      await api(API + "/" + delId, { method: "DELETE" });
+      toast("Record deleted");
+      if (editingId === delId) resetForm();
+      load();
+    } catch (err) { toast(err.message, true); }
+  }
+});
+
+load();
+</script>
+</body>
+</html>

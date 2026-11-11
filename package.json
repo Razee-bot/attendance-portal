@@ -1,0 +1,10 @@
+{
+  "name": "attendance-portal",
+  "version": "1.0.0",
+  "description": "Attendance Management Portal - Database 2 Lab Finals (MongoDB Atlas + Vercel)",
+  "private": true,
+  "dependencies": {
+    "mongodb": "^6.8.0"
+  },
+  "engines": { "node": ">=18" }
+}
